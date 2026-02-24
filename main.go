@@ -42,6 +42,85 @@ var valuePool = sync.Pool{
 		return &Value{}
 	},
 }
+var childBufPool8 = sync.Pool{New: func() any { return make([]*Value, 8) }}
+var childBufPool16 = sync.Pool{New: func() any { return make([]*Value, 16) }}
+var childBufPool32 = sync.Pool{New: func() any { return make([]*Value, 32) }}
+var gradBufPool8 = sync.Pool{New: func() any { return make([]float64, 8) }}
+var gradBufPool16 = sync.Pool{New: func() any { return make([]float64, 16) }}
+var gradBufPool32 = sync.Pool{New: func() any { return make([]float64, 32) }}
+
+func bufClass(n int) int {
+	switch {
+	case n <= 8:
+		return 8
+	case n <= 16:
+		return 16
+	case n <= 32:
+		return 32
+	default:
+		return 0
+	}
+}
+
+func getChildBuf(n int) []*Value {
+	switch bufClass(n) {
+	case 8:
+		return childBufPool8.Get().([]*Value)[:n]
+	case 16:
+		return childBufPool16.Get().([]*Value)[:n]
+	case 32:
+		return childBufPool32.Get().([]*Value)[:n]
+	default:
+		return make([]*Value, n)
+	}
+}
+
+func putChildBuf(buf []*Value) {
+	switch cap(buf) {
+	case 8:
+		full := buf[:8]
+		clear(full)
+		childBufPool8.Put(full)
+	case 16:
+		full := buf[:16]
+		clear(full)
+		childBufPool16.Put(full)
+	case 32:
+		full := buf[:32]
+		clear(full)
+		childBufPool32.Put(full)
+	}
+}
+
+func getGradBuf(n int) []float64 {
+	switch bufClass(n) {
+	case 8:
+		return gradBufPool8.Get().([]float64)[:n]
+	case 16:
+		return gradBufPool16.Get().([]float64)[:n]
+	case 32:
+		return gradBufPool32.Get().([]float64)[:n]
+	default:
+		return make([]float64, n)
+	}
+}
+
+func putGradBuf(buf []float64) {
+	switch cap(buf) {
+	case 8:
+		full := buf[:8]
+		clear(full)
+		gradBufPool8.Put(full)
+	case 16:
+		full := buf[:16]
+		clear(full)
+		gradBufPool16.Put(full)
+	case 32:
+		full := buf[:32]
+		clear(full)
+		gradBufPool32.Put(full)
+	}
+}
 
 func RandN(mu, sigma float64) float64 {
 	return mu + sigma*rng.NormFloat64()
@@ -157,6 +236,8 @@ func releaseGraph(topo []*Value) {
 		}
 		node.Data = 0
 		node.Grad = 0
+		putChildBuf(node.Children)
+		putGradBuf(node.LocalGrads)
 		node.Children = nil
 		node.LocalGrads = nil
 		node.mark = 0
@@ -233,8 +314,8 @@ func ReduceAdd(vs Vec) *Value {
 
 func Dot(a, b Vec) *Value {
 	n := len(a)
-	children := make([]*Value, 2*n)
-	localGrads := make([]float64, 2*n)
+	children := getChildBuf(2 * n)
+	localGrads := getGradBuf(2 * n)
 	sum := 0.0
 	for i := range n {
 		av := a[i]
@@ -250,8 +331,8 @@ func Dot(a, b Vec) *Value {
 
 func WeightedSum(weights Vec, vectors []Vec, dim int) *Value {
 	n := len(weights)
-	children := make([]*Value, 2*n)
-	localGrads := make([]float64, 2*n)
+	children := getChildBuf(2 * n)
+	localGrads := getGradBuf(2 * n)
 	sum := 0.0
 	for i := range n {
 		w := weights[i]
@@ -617,6 +698,40 @@ func ensureInput() error {
 	return err
 }
 
+func loadDocs() ([]string, error) {
+	if runtime.GOOS == "js" {
+		// Browser/WASM fallback dataset (no local filesystem access).
+		return []string{
+			"anna", "maria", "luca", "nora", "milo",
+			"oliver", "ava", "liam", "emma", "noah",
+			"sophia", "isabella", "mia", "charlotte", "amelia",
+			"harper", "evelyn", "abigail", "ella", "scarlett",
+		}, nil
+	}
+
+	if err := ensureInput(); err != nil {
+		return nil, err
+	}
+	file, err := os.Open("input.txt")
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	docs := []string{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			docs = append(docs, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return docs, nil
+}
+
 func main() {
 	cpuProfilePath := strings.TrimSpace(os.Getenv("MICROGPT_CPU_PROFILE"))
 	if cpuProfilePath != "" {
@@ -633,23 +748,10 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	if err := ensureInput(); err != nil {
-		fmt.Printf("Error downloading data: %v\n", err)
-		return
-	}
-	file, err := os.Open("input.txt")
+	docs, err := loadDocs()
 	if err != nil {
-		fmt.Printf("Error opening input.txt: %v\n", err)
+		fmt.Printf("Error loading data: %v\n", err)
 		return
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	docs := []string{}
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			docs = append(docs, line)
-		}
 	}
 	rand.Shuffle(len(docs), func(i, j int) {
 		docs[i], docs[j] = docs[j], docs[i]
@@ -709,6 +811,15 @@ func main() {
 	// Adam buffers
 	m := make([]float64, len(params))
 	vAdam := make([]float64, len(params))
+	trainKeys := make([][]Vec, NLayer)
+	trainValues := make([][]Vec, NLayer)
+	for i := range NLayer {
+		trainKeys[i] = make([]Vec, 0, BlockSize)
+		trainValues[i] = make([]Vec, 0, BlockSize)
+	}
+	logitsF := make([]float64, vocabSize)
+	lossChildrenBuf := make([]*Value, 0, BlockSize*vocabSize)
+	lossLocalGradsBuf := make([]float64, 0, BlockSize*vocabSize)
 	// training
 	for step := range NumSteps {
 		docIdx := step % len(docs)
@@ -722,25 +833,23 @@ func main() {
 		if len(tokens)-1 < n {
 			n = len(tokens) - 1
 		}
-		keys := make([][]Vec, NLayer)
-		values := make([][]Vec, NLayer)
-		for i := range keys {
-			keys[i] = []Vec{}
-			values[i] = []Vec{}
+		for i := range NLayer {
+			trainKeys[i] = trainKeys[i][:0]
+			trainValues[i] = trainValues[i][:0]
 		}
 		invN := 1.0 / float64(n)
 		totalLoss := 0.0
-		lossChildren := make([]*Value, 0, n*vocabSize)
-		lossLocalGrads := make([]float64, 0, n*vocabSize)
+		lossChildren := lossChildrenBuf[:0]
+		lossLocalGrads := lossLocalGradsBuf[:0]
 		for pos := range n {
 			tokenID := tokens[pos]
 			targetID := tokens[pos+1]
-			logits := GPT(tokenID, pos, keys, values, state, layerKeys)
-			logitsF := make([]float64, len(logits))
+			logits := GPT(tokenID, pos, trainKeys, trainValues, state, layerKeys)
+			logitsScratch := logitsF[:len(logits)]
 			for i := range logits {
-				logitsF[i] = logits[i].Data
+				logitsScratch[i] = logits[i].Data
 			}
-			probs := softmaxF(logitsF)
+			probs := softmaxF(logitsScratch)
 			totalLoss += -math.Log(probs[targetID])
 			for i := range logits {
 				grad := probs[i]
@@ -773,23 +882,28 @@ func main() {
 	fmt.Println("--- inference (new, hallucinated names) ---")
 	temp := 0.5
 	inf := buildInferenceState(state, layerKeys)
+	infKeys := make([][][]float64, NLayer)
+	infValues := make([][][]float64, NLayer)
+	for i := range NLayer {
+		infKeys[i] = make([][]float64, 0, BlockSize)
+		infValues[i] = make([][]float64, 0, BlockSize)
+	}
+	tempLogits := make([]float64, vocabSize)
 	for sidx := range 20 {
-		keys := make([][][]float64, NLayer)
-		values := make([][][]float64, NLayer)
-		for i := range keys {
-			keys[i] = [][]float64{}
-			values[i] = [][]float64{}
+		for i := range NLayer {
+			infKeys[i] = infKeys[i][:0]
+			infValues[i] = infValues[i][:0]
 		}
 		sample := []rune{}
 		tokenID := BOS
 		for pos := range BlockSize {
-			logits := gptInference(tokenID, pos, keys, values, inf)
+			logits := gptInference(tokenID, pos, infKeys, infValues, inf)
 			invTemp := 1.0 / temp
-			tempLogits := make([]float64, len(logits))
+			tempLogitsScratch := tempLogits[:len(logits)]
 			for i, l := range logits {
-				tempLogits[i] = l * invTemp
+				tempLogitsScratch[i] = l * invTemp
 			}
-			probs := softmaxF(tempLogits)
+			probs := softmaxF(tempLogitsScratch)
 			nextToken := categoricalF(probs)
 			tokenID = nextToken
 			if nextToken == BOS {
