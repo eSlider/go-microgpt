@@ -78,8 +78,11 @@ Reference: https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95
 - Same tiny-GPT teaching model style as the gist, but with production-oriented runtime engineering.
 - Native CLI and browser/WASM execution paths in one codebase.
 - Profiling-driven optimization workflow (`pprof`) built into normal runs.
-- End-to-end speed improvement of about **7.9x** on the same machine (`23.40s -> 2.97s`).
+- End-to-end speed improvement of about **7.9x** on the same machine (`23.40s -> 2.97s`), i.e. about **87.31% less runtime**.
 - Allocation profile reduction from about **11.3GB** to about **1.28GB** total alloc space in profiled runs.
+- Measured against the original Python gist on this machine, current optimized Go runtime is about **108.96x faster** (`5:23.61` vs `2.97s`) for a full run:
+  - about **99.08% less runtime**, or
+  - about **10,795.96% higher throughput-equivalent speed**.
 - Main lesson from this Go implementation: most gains came from graph/memory/layout optimizations (fused ops, pooling, scratch reuse), not from adding more goroutines alone.
 
 ### Major optimizations applied
@@ -129,6 +132,7 @@ They are approximate and include run-to-run noise, but show the trend clearly.
 
 | Stage | Elapsed |
 |---|---:|
+| Karpathy original Python gist (this machine) | 5:23.61 |
 | Early baseline | 23.40s |
 | Adaptive concurrency + key/allocation cleanup | 22.27s |
 | Numeric inference path | 21.71s |
@@ -137,7 +141,7 @@ They are approximate and include run-to-run noise, but show the trend clearly.
 | Fused Dot/WeightedSum ops | 3.17s |
 | Buffer pooling + scratch reuse + fused RMSNorm | 2.97s |
 
-Overall speedup from the recorded baseline: **~7.9x** (`23.40s -> 2.97s`).
+Overall speedup from the recorded baseline: **~7.9x** (`23.40s -> 2.97s`), i.e. about **87.31% runtime reduction**.
 
 ## Remaining improvement ideas
 
