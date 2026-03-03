@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Go MicroGPT WASM</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      background: #0b1020;
+      color: #dbeafe;
+    }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0 0 8px;
+    }
+    p {
+      margin: 0 0 16px;
+      color: #93c5fd;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: #2563eb;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 260px;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Go MicroGPT (WASM)</h1>
+    <p>Runs the Go program in your browser and streams logs below.</p>
+    <button id="runBtn">Run</button>
+    <pre id="log"></pre>
+  </div>
+
+  <script src="./wasm_exec.js"></script>
+  <script>
+    const runBtn = document.getElementById("runBtn");
+    const logEl = document.getElementById("log");
+
+    const append = (msg) => {
+      logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    const oldLog = console.log;
+    const oldErr = console.error;
+    console.log = (...args) => {
+      append(args.map(String).join(" "));
+      oldLog(...args);
+    };
+    console.error = (...args) => {
+      append("[error] " + args.map(String).join(" "));
+      oldErr(...args);
+    };
+
+    async function runWasm() {
+      runBtn.disabled = true;
+      logEl.textContent = "";
+      append("Loading WASM...");
+
+      const go = new Go();
+      const result = await WebAssembly.instantiateStreaming(fetch("./main.wasm"), go.importObject);
+      append("Running...");
+      await go.run(result.instance);
+      append("Done.");
+    }
+
+    runBtn.addEventListener("click", () => {
+      runWasm().catch((err) => {
+        console.error(err);
+        runBtn.disabled = false;
+      });
+    });
+  </script>
+</body>
+</html>

@@ -356,19 +356,33 @@ func Linear(w Matrix, x Vec) Vec {
 
 func RMSNorm(x Vec) Vec {
 	n := len(x)
-	invN := NewValue(1.0/float64(n), nil, nil)
-	msTerms := make(Vec, n)
-	for i, xi := range x {
-		msTerms[i] = Mul(xi, xi)
+	if n == 0 {
+		return Vec{}
 	}
-	ms := Mul(ReduceAdd(msTerms), invN)
-	epsV := NewValue(1e-5, nil, nil)
-	scaleBase := Add(ms, epsV)
-	expV := NewValue(-0.5, nil, nil)
-	scale := Pow(scaleBase, expV)
+
+	ms := 0.0
+	for _, xi := range x {
+		ms += xi.Data * xi.Data
+	}
+	invN := 1.0 / float64(n)
+	a := ms*invN + 1e-5
+	scale := math.Pow(a, -0.5)
+	common := invN * math.Pow(a, -1.5)
+
 	res := make(Vec, n)
-	for i, xi := range x {
-		res[i] = Mul(xi, scale)
+	for i := range n {
+		xi := x[i].Data
+		children := getChildBuf(n)
+		localGrads := getGradBuf(n)
+		for k := range n {
+			children[k] = x[k]
+			grad := -xi * x[k].Data * common
+			if k == i {
+				grad += scale
+			}
+			localGrads[k] = grad
+		}
+		res[i] = NewValue(xi*scale, children, localGrads)
 	}
 	return res
 }
