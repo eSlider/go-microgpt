@@ -83,6 +83,8 @@ Reference: https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95
 - Measured against the original Python gist on this machine, current optimized Go runtime is about **108.96x faster** (`5:23.61` vs `2.97s`) for a full run:
   - about **99.08% less runtime**, or
   - about **10,795.96% higher throughput-equivalent speed**.
+- Python memory (measured with `/usr/bin/time -v`): peak RSS **60,220 KB** (~**58.8 MB**) for the original gist run (`5:29.06`).
+- Metric note: Go memory figures above come from `pprof` alloc-space and are not directly the same metric as peak RSS.
 - Main lesson from this Go implementation: most gains came from graph/memory/layout optimizations (fused ops, pooling, scratch reuse), not from adding more goroutines alone.
 
 ### Major optimizations applied
