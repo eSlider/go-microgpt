@@ -2,6 +2,11 @@
 
 Tiny GPT-like character model in pure Go, inspired by the microgpt/makemore style.
 Training and interfacing GPTs using pure, dependency free Golang.
+Original author/inspiration: Andrej Karpathy - https://github.com/karpathy/makemore
+
+## Package Documentation
+
+- pkg.go.dev: `https://pkg.go.dev/github.com/eSlider/go-microgpt`
 
 ## What this project does
 
@@ -60,6 +65,22 @@ go tool pprof -top -alloc_space ./go_microgpt mem.pprof
 ## Optimization summary
 
 The codebase was optimized in multiple focused passes, keeping behavior the same while reducing allocations and runtime overhead.
+
+## Comparison to Karpathy gist
+
+Reference: https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95
+
+- The original gist emphasizes algorithmic clarity first ("Everything else is just efficiency"), and this project follows that same core algorithmic structure.
+- The Go version then focuses on efficiency engineering while keeping the algorithm simple and dependency-free.
+
+### What is achieved now with Golang
+
+- Same tiny-GPT teaching model style as the gist, but with production-oriented runtime engineering.
+- Native CLI and browser/WASM execution paths in one codebase.
+- Profiling-driven optimization workflow (`pprof`) built into normal runs.
+- End-to-end speed improvement of about **7.9x** on the same machine (`23.40s -> 2.97s`).
+- Allocation profile reduction from about **11.3GB** to about **1.28GB** total alloc space in profiled runs.
+- Main lesson from this Go implementation: most gains came from graph/memory/layout optimizations (fused ops, pooling, scratch reuse), not from adding more goroutines alone.
 
 ### Major optimizations applied
 
