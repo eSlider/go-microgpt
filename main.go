@@ -16,7 +16,14 @@ import (
 	"sync/atomic"
 )
 
-const namesURL = "https://raw.githubusercontent.com/karpathy/makemore/988aa59/names.txt"
+const swearsReadmeURL = "https://raw.githubusercontent.com/nickname76/russian-swears/master/README.md"
+
+var swearIndexSections = map[string]struct{}{
+	"## Базовые слова":          {},
+	"## Приставки":              {},
+	"## Производные слова":      {},
+	"## Словообороты и выражения": {},
+}
 
 const (
 	NLayer    = 1
@@ -694,21 +701,69 @@ func Categorical(probs Vec) int {
 	return len(ws) - 1 // fallback
 }
 
+func extractSwearTerms(markdown string) []string {
+	lines := strings.Split(markdown, "\n")
+	terms := make([]string, 0, 512)
+	seen := make(map[string]struct{}, 512)
+	collect := false
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "## ") {
+			_, collect = swearIndexSections[line]
+			continue
+		}
+		if collect && strings.HasPrefix(line, "### ") {
+			collect = false
+			continue
+		}
+		if !collect || !strings.HasPrefix(line, "- [") {
+			continue
+		}
+		end := strings.Index(line, "](#")
+		if end == -1 {
+			continue
+		}
+		term := strings.TrimPrefix(line[:end], "- [")
+		term = strings.ReplaceAll(term, "_", "")
+		term = strings.Join(strings.Fields(term), " ")
+		if term == "" {
+			continue
+		}
+		if _, ok := seen[term]; ok {
+			continue
+		}
+		seen[term] = struct{}{}
+		terms = append(terms, term)
+	}
+	return terms
+}
+
 func ensureInput() error {
 	if _, err := os.Stat("input.txt"); err == nil {
 		return nil
 	}
-	resp, err := http.Get(namesURL)
+	resp, err := http.Get(swearsReadmeURL)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("source fetch failed: %s", resp.Status)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	terms := extractSwearTerms(string(body))
+	if len(terms) == 0 {
+		return fmt.Errorf("source parse failed: no terms extracted")
+	}
 	f, err := os.Create("input.txt")
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
+	_, err = f.WriteString(strings.Join(terms, "\n") + "\n")
 	return err
 }
 
